@@ -141,4 +141,3 @@ git push -u origin main
 ```
 
 The `.gitignore` file excludes virtual environments, Python cache files, and model checkpoints.
-
