@@ -2,7 +2,7 @@
 
 This project implements a reinforcement-learning playground for **Yutnori**, a traditional Korean board game. It includes a simplified two-player Yutnori environment and several agents for baseline comparison.
 
-The current main model is a **Value Network agent** that selects actions by simulating legal moves and comparing the value of the resulting next states. A DQN baseline is also included for comparison.
+The default model is a **Value Network agent**, closer to the approach used in prior Yutnori reinforcement-learning work. Tabular Q-learning and DQN baselines are also included for comparison.
 
 한국어 사용 가이드는 [GUIDE_KO.md](GUIDE_KO.md)를 참고하세요.
 
@@ -16,20 +16,27 @@ The current main model is a **Value Network agent** that selects actions by simu
 - Bonus roll after capture
 - Basic shortcut board graph
 - No back-do yet
-- Random, rule-based, DQN, and Value Network agents
+- One-hot piece-position observations
+- Held yut/mo roll results that can be consumed in chosen order
+- Consecutive yut/mo bonus rolls capped at four
+- Expanded actions: roll result choice plus piece choice
+- Terminal loss reward of `-1`
+- DQN and Value Network hidden size default of 256
+- Multi-opponent self-play for the Value Network agent
+- Random, rule-based, Tabular Q-learning, DQN, and Value Network agents
 - Training, evaluation, checkpoint saving, and continued training
 
 ## Yut Probabilities
 
-The environment currently uses the standard combinational probabilities without back-do:
+The environment uses the probability distribution from the referenced Yutnori reinforcement-learning paper. Back-do is not implemented yet, so its 3.8% probability is folded into do. The rounded do/gae/geol/yut/mo probabilities are normalized internally to sum to 1.
 
 | Result | Steps | Probability |
 | --- | ---: | ---: |
-| do | 1 | 4/16 |
-| gae | 2 | 6/16 |
-| geol | 3 | 4/16 |
-| yut | 4 | 1/16 |
-| mo | 5 | 1/16 |
+| do | 1 | 15.3%, including back-do |
+| gae | 2 | 34.6% |
+| geol | 3 | 34.6% |
+| yut | 4 | 12.0% |
+| mo | 5 | 2.6% |
 
 ## Project Structure
 
@@ -59,16 +66,41 @@ python3.11 -m venv .venv
 
 ## Train the Value Network Agent
 
-The default command trains the Value Network agent for 50,000 episodes.
+The default command trains the Value Network agent.
 
 ```bash
 .venv/bin/python -m yut_rl.train
+```
+
+Run a smaller 100-episode experiment:
+
+```bash
+.venv/bin/python -m yut_rl.train --episodes 100 --eval-games 50 --eval-interval 50
+```
+
+## Longer Value Network Training
+
+This command trains the Value Network agent for 50,000 episodes.
+
+```bash
+.venv/bin/python -m yut_rl.train --agent value --episodes 50000
 ```
 
 Run a smaller 1,000-episode experiment:
 
 ```bash
 .venv/bin/python -m yut_rl.train --episodes 1000 --eval-games 200 --eval-interval 200
+```
+
+Configure the self-play opponent pool:
+
+```bash
+.venv/bin/python -m yut_rl.train \
+  --agent value \
+  --episodes 50000 \
+  --snapshot-interval 1000 \
+  --opponent-pool-size 5 \
+  --rule-opponent-weight 4.0
 ```
 
 Useful options:
@@ -79,9 +111,8 @@ Useful options:
   --episodes 50000 \
   --eval-games 200 \
   --eval-interval 5000 \
-  --lr 0.001 \
   --gamma 0.97 \
-  --batch-size 64 \
+  --hidden-dim 256 \
   --epsilon-start 0.8 \
   --epsilon-end 0.05 \
   --save-model checkpoints/value.pt
@@ -112,19 +143,26 @@ Chooses one legal piece uniformly at random.
 
 Uses simple hand-written priorities such as finishing pieces, capturing opponents, moving stacked pieces, and reducing distance to finish.
 
+### Tabular Q-learning Agent
+
+Learns Q-values in a Python dictionary without PyTorch. This is the default first-run agent because it works with only the Python standard library.
+
 ### DQN Agent
 
-Learns action-values `Q(s, a)` and directly outputs values for the four piece choices.
+Learns action-values `Q(s, a)` over the expanded action space: five possible roll results times four pieces.
 
 ### Value Network Agent
 
 Evaluates states rather than actions. For each legal action, it simulates the next state and chooses the move with the highest predicted state value. This is closer to the approach used in previous Yutnori reinforcement-learning research than the basic DQN baseline.
 
+During training, it can play against the current model, random/rule-based baselines, and frozen snapshots of older versions of itself.
+
 ## Current Limitations
 
 - Back-do is not implemented yet.
-- The state representation is still compact and can be improved.
+- The state representation now uses one-hot piece positions, but it is still smaller than a full paper reproduction.
 - The current Value Network is inspired by prior work but is not a full reproduction of the paper.
+- Checkpoints created before the one-hot/action-space change may not load into the current model.
 - Evaluation results depend on random seeds and training length.
 
 ## GitHub Upload

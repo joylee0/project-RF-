@@ -14,21 +14,28 @@
 - 잡았을 때 추가 던지기 적용
 - 뒷도 제외
 - 지름길이 있는 기본 윷판 그래프 구현
-- Random, Rule-based, DQN, Value Network 에이전트 구현
+- 말 위치 one-hot 상태 표현 적용
+- 윷/모가 나오면 추가 던지기를 모두 끝낸 뒤 결과 묶음을 보관하고 원하는 순서로 사용
+- 윷/모 연속 보너스는 최대 4회까지 허용
+- 행동을 `사용할 윷 결과 + 움직일 말` 조합으로 확장
+- 패배 시 `-1` 보상 적용
+- DQN과 Value Network hidden size 기본값 256
+- Value Network self-play에서 Random, Rule-based, 과거 스냅샷 모델을 섞어 상대
+- Random, Rule-based, Tabular Q-learning, DQN, Value Network 에이전트 구현
 - 학습 중 승률 평가
 - 모델 저장 및 이어서 학습 지원
 
 ## 윷 확률
 
-현재 코드는 뒷도를 제외하고 아래 확률을 사용합니다.
+현재 코드는 논문에서 사용한 윷 확률을 기준으로 합니다.
 
-- 도: 4/16
-- 개: 6/16
-- 걸: 4/16
-- 윷: 1/16
-- 모: 1/16
+- 도: 15.3% (논문의 도 11.5% + 아직 미구현된 뒷도 3.8%를 도로 처리)
+- 개: 34.6%
+- 걸: 34.6%
+- 윷: 12.0%
+- 모: 2.6%
 
-이 확률은 윷가락 네 개가 각각 같은 확률로 앞/뒤가 나온다고 가정한 기본 조합 확률입니다. 체감상 윷과 모가 자주 나오지 않는 점도 이 설정에 반영되어 있습니다.
+논문 표의 확률은 반올림값이라 전체 합이 정확히 100%가 아닙니다. 현재 코드에는 뒷도가 아직 구현되어 있지 않기 때문에, 뒷도 확률은 도에 합쳐서 처리하고 도/개/걸/윷/모 확률의 합이 1이 되도록 정규화해서 사용합니다.
 
 ## 에이전트 종류
 
@@ -45,9 +52,15 @@
 - 업힌 말 이동에 가산점
 - 도착까지 남은 거리가 짧을수록 선호
 
+### Tabular Q-learning Agent
+
+PyTorch 없이 Python 기본 기능만으로 실행되는 첫 강화학습 모델입니다.
+
+상태별 Q값을 딕셔너리에 저장하고, 가능한 행동 중 Q값이 높은 행동을 선택합니다. 현재 행동은 단순히 말 4개 중 하나가 아니라 `윷 결과 5종 x 말 4개` 조합입니다.
+
 ### DQN Agent
 
-상태를 입력으로 받고, 말 4개 각각에 대한 Q값을 출력합니다. 현재 상태에서 어느 말을 움직일지 직접 고르는 방식입니다.
+one-hot 상태를 입력으로 받고, 최대 20개 행동에 대한 Q값을 출력합니다. 현재 보유한 윷 결과와 움직일 말을 함께 고르는 방식입니다.
 
 ### Value Network Agent
 
@@ -55,7 +68,9 @@
 
 가능한 행동을 하나씩 미리 시뮬레이션한 뒤, 각 행동으로 만들어지는 다음 상태를 신경망이 평가합니다. 그리고 다음 상태 가치가 가장 높은 행동을 선택합니다.
 
-현재 기본 실행은 이 `Value Network Agent`를 사용합니다.
+학습 중에는 현재 모델 혼자만 상대하지 않고, Random, Rule-based, 과거에 저장한 자기 자신의 스냅샷 모델을 섞어서 상대합니다. 이렇게 하면 한 가지 상대에게만 과적합되는 문제를 줄일 수 있습니다.
+
+현재 기본 실행은 논문 방식에 더 가까운 `Value Network Agent`를 사용합니다.
 
 ## 주요 파일
 
@@ -101,7 +116,7 @@ cd /Users/joylee/Desktop/프로젝트
 기본값은 아래와 같습니다.
 
 - 에이전트: `value`
-- 에피소드: `50000`
+- 에피소드: `1000`
 - 평가 게임 수: `200`
 - 중간 평가 간격: `5000`
 - 저장 위치: `checkpoints/value.pt`
@@ -118,6 +133,25 @@ cd /Users/joylee/Desktop/프로젝트
 .venv/bin/python -m yut_rl.train --agent dqn --episodes 1000 --eval-games 200 --eval-interval 200
 ```
 
+## Value Network 방식 실행
+
+PyTorch 설치가 되어 있을 때 실행할 수 있습니다.
+
+```bash
+.venv/bin/python -m yut_rl.train --agent value --episodes 1000 --eval-games 200 --eval-interval 200
+```
+
+스냅샷 상대 풀을 조절하려면 아래 옵션을 사용합니다.
+
+```bash
+.venv/bin/python -m yut_rl.train \
+  --agent value \
+  --episodes 50000 \
+  --snapshot-interval 1000 \
+  --opponent-pool-size 5 \
+  --rule-opponent-weight 4.0
+```
+
 ## 파라미터 바꾸기
 
 ```bash
@@ -126,24 +160,35 @@ cd /Users/joylee/Desktop/프로젝트
   --episodes 50000 \
   --eval-games 200 \
   --eval-interval 5000 \
-  --lr 0.001 \
   --gamma 0.97 \
-  --batch-size 64 \
+  --hidden-dim 256 \
   --epsilon-start 0.8 \
   --epsilon-end 0.05
 ```
 
 주요 파라미터 의미:
 
-- `--agent`: 사용할 모델, `value` 또는 `dqn`
+- `--agent`: 사용할 모델, `tabular`, `value`, `dqn`
 - `--episodes`: 학습할 게임 수
 - `--eval-games`: 승률 평가에 사용할 게임 수
 - `--eval-interval`: 몇 에피소드마다 중간 승률을 출력할지
+- `--alpha`: Tabular Q-learning 학습률
 - `--lr`: 학습률
 - `--gamma`: 미래 보상 반영 비율
+- `--hidden-dim`: DQN, Value Network의 은닉층 크기
 - `--batch-size`: 한 번 업데이트할 때 사용할 샘플 수
 - `--epsilon-start`: 학습 초반 무작위 행동 비율
 - `--epsilon-end`: 학습 후반 최소 무작위 행동 비율
+- `--snapshot-interval`: 몇 에피소드마다 현재 Value Network를 상대 모델로 저장할지
+- `--opponent-pool-size`: 과거 스냅샷 상대를 몇 개까지 유지할지
+- `--rule-opponent-weight`: Value Network 학습에서 Rule-based 상대를 얼마나 자주 만날지
+- `--self-opponent-weight`: 현재 자기 자신을 상대할 가중치
+- `--random-opponent-weight`: Random 상대 가중치
+- `--snapshot-opponent-weight`: 과거 스냅샷 상대 가중치
+
+## 저장된 모델 호환성
+
+one-hot 상태 표현과 행동 공간이 바뀌었기 때문에, 예전에 저장한 `value.pt`나 `dqn.pt`는 새 모델 구조와 맞지 않을 수 있습니다. 구조 변경 후에는 새로 학습한 체크포인트를 사용하는 것이 좋습니다.
 
 ## 이어서 학습하기
 
@@ -179,4 +224,3 @@ git push
 ```
 
 GitHub에서 먼저 빈 저장소를 만든 뒤, 위 명령어의 `사용자이름/저장소이름` 부분만 본인 저장소 주소로 바꾸면 됩니다.
-

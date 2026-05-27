@@ -6,13 +6,20 @@ from typing import Iterable
 
 START = -1
 FINISH = 99
+BOARD_POSITIONS = [START] + list(range(27)) + [FINISH]
+POS_TO_INDEX = {pos: idx for idx, pos in enumerate(BOARD_POSITIONS)}
+POSITION_FEATURES = len(BOARD_POSITIONS)
+PIECES_PER_PLAYER = 4
+MAX_STEPS = 5
+ACTION_DIM = PIECES_PER_PLAYER * MAX_STEPS
+MAX_CONSECUTIVE_BONUS_ROLLS = 4
 
 YUT_OUTCOMES = (
-    ("do", 1, 4 / 16, False),
-    ("gae", 2, 6 / 16, False),
-    ("geol", 3, 4 / 16, False),
-    ("yut", 4, 1 / 16, True),
-    ("mo", 5, 1 / 16, True),
+    ("do", 1, 0.153 / 0.991, False),
+    ("gae", 2, 0.346 / 0.991, False),
+    ("geol", 3, 0.346 / 0.991, False),
+    ("yut", 4, 0.120 / 0.991, True),
+    ("mo", 5, 0.026 / 0.991, True),
 )
 
 OUTER = list(range(20))
@@ -78,21 +85,24 @@ class YutEnv:
     def observe_for(self, player: int) -> list[float]:
         me = self.positions[player]
         opp = self.positions[1 - player]
-        encoded = [self._encode_pos(pos) for pos in me + opp]
-        pending = self.pending_steps[0] if self.pending_steps else 0
-        encoded.append(pending / 5)
+        encoded = []
+        for pos in me + opp:
+            encoded.extend(self._encode_pos(pos))
+        for steps in range(1, MAX_STEPS + 1):
+            encoded.append(min(self.pending_steps.count(steps), 4) / 4)
         encoded.append(1.0 if self.current_player == player else 0.0)
         return encoded
 
     def legal_actions(self) -> list[int]:
         self._ensure_pending_roll()
-        steps = self.pending_steps[0]
         legal = []
+        available_steps = sorted(set(self.pending_steps))
         for piece, pos in enumerate(self.positions[self.current_player]):
             if pos == FINISH:
                 continue
             if pos == START or self._is_stack_leader(self.current_player, piece):
-                legal.append(piece)
+                for steps in available_steps:
+                    legal.append(encode_action(piece, steps))
         return legal
 
     def step(self, action: int) -> StepResult:
@@ -103,10 +113,11 @@ class YutEnv:
         if action not in legal:
             return StepResult(self.observe(), -1.0, False, {"illegal": True})
 
-        steps = self.pending_steps.pop(0)
+        piece, steps = decode_action(action)
+        self.pending_steps.remove(steps)
         before_finished = self.positions[player].count(FINISH)
-        moving = self._stack_members(player, action)
-        old_pos = self.positions[player][action]
+        moving = self._stack_members(player, piece)
+        old_pos = self.positions[player][piece]
         new_pos = advance(old_pos, steps)
 
         for piece in moving:
@@ -122,7 +133,7 @@ class YutEnv:
         reward += 0.2 * max(0, after_finished - before_finished)
         if captured:
             reward += 0.1
-            self._roll_once()
+            self.pending_steps.extend(self._roll_turn_results())
         if done:
             reward += 1.0
 
@@ -156,21 +167,31 @@ class YutEnv:
                 return player
         return None
 
-    def _roll_once(self) -> None:
+    def _roll_once(self) -> tuple[str, int, bool]:
         r = self.rng.random()
         acc = 0.0
         for name, steps, prob, bonus in YUT_OUTCOMES:
             acc += prob
             if r <= acc:
-                self.pending_steps.append(steps)
                 self.last_roll_name = name
-                if bonus:
-                    self._roll_once()
-                return
+                return name, steps, bonus
+
+    def _roll_turn_results(self) -> list[int]:
+        results = []
+        consecutive_bonus_rolls = 0
+        while True:
+            name, steps, bonus = self._roll_once()
+            results.append(steps)
+            if bonus:
+                consecutive_bonus_rolls += 1
+            if not bonus:
+                return results
+            if consecutive_bonus_rolls >= MAX_CONSECUTIVE_BONUS_ROLLS:
+                return results
 
     def _ensure_pending_roll(self) -> None:
         if not self.pending_steps:
-            self._roll_once()
+            self.pending_steps.extend(self._roll_turn_results())
 
     def _stack_members(self, player: int, piece: int) -> list[int]:
         pos = self.positions[player][piece]
@@ -193,12 +214,20 @@ class YutEnv:
         return captured
 
     @staticmethod
-    def _encode_pos(pos: int) -> float:
-        if pos == START:
-            return 0.0
-        if pos == FINISH:
-            return 1.0
-        return (pos + 1) / 100
+    def _encode_pos(pos: int) -> list[float]:
+        encoded = [0.0] * POSITION_FEATURES
+        encoded[POS_TO_INDEX[pos]] = 1.0
+        return encoded
+
+
+def encode_action(piece: int, steps: int) -> int:
+    return (steps - 1) * PIECES_PER_PLAYER + piece
+
+
+def decode_action(action: int) -> tuple[int, int]:
+    piece = action % PIECES_PER_PLAYER
+    steps = action // PIECES_PER_PLAYER + 1
+    return piece, steps
 
 
 def advance(pos: int, steps: int) -> int:

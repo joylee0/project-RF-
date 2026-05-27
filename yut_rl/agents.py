@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections import deque
+import ast
+import json
 import random
 
-from .env import FINISH, START, YutEnv, advance, distance_to_finish
+from .env import ACTION_DIM, FINISH, START, YutEnv, advance, decode_action, distance_to_finish
 
 
 class RandomAgent:
@@ -21,26 +23,106 @@ class RuleBasedAgent:
     def act(self, env: YutEnv) -> int:
         player = env.current_player
         opponent = 1 - player
-        steps = env.pending_steps[0]
         legal = env.legal_actions()
         opp_positions = set(env.positions[opponent])
 
         scored = []
-        for piece in legal:
+        for action in legal:
+            piece, steps = decode_action(action)
             old_pos = env.positions[player][piece]
             new_pos = advance(old_pos, steps)
             score = 0.0
             if new_pos == FINISH:
                 score += 100
-            if new_pos in opp_positions:
+            if new_pos != FINISH and new_pos in opp_positions:
                 score += 50
             if old_pos == START:
                 score += 5
-            stack_size = env.positions[player].count(old_pos)
+            stack_size = 1 if old_pos == START else env.positions[player].count(old_pos)
             score += 4 * max(0, stack_size - 1)
             score -= 0.5 * distance_to_finish(new_pos)
-            scored.append((score, piece))
+            scored.append((score, action))
         return max(scored)[1]
+
+
+class TabularQAgent:
+    """Dependency-free Q-learning baseline for first experiments.
+
+    The state space is still large, but this agent is useful as a runnable
+    first RL draft before moving to neural models such as DQN or PPO.
+    """
+
+    def __init__(
+        self,
+        alpha: float = 0.15,
+        gamma: float = 0.97,
+        seed: int | None = None,
+    ):
+        self.alpha = alpha
+        self.gamma = gamma
+        self.rng = random.Random(seed)
+        self.q: dict[tuple, list[float]] = {}
+
+    def act(self, env: YutEnv, epsilon: float = 0.0) -> int:
+        legal = env.legal_actions()
+        if self.rng.random() < epsilon:
+            return self.rng.choice(legal)
+
+        values = self._values(self.state_key(env))
+        return max(legal, key=lambda action: values[action])
+
+    def update(
+        self,
+        state_key: tuple,
+        action: int,
+        reward: float,
+        next_state_key: tuple | None,
+        next_legal: list[int],
+        done: bool,
+    ) -> None:
+        values = self._values(state_key)
+        if done or next_state_key is None or not next_legal:
+            target = reward
+        else:
+            next_values = self._values(next_state_key)
+            target = reward + self.gamma * max(next_values[action] for action in next_legal)
+        values[action] += self.alpha * (target - values[action])
+
+    def state_key(self, env: YutEnv, player: int | None = None) -> tuple:
+        if player is None:
+            player = env.current_player
+        opponent = 1 - player
+        return (
+            tuple(env.positions[player]),
+            tuple(env.positions[opponent]),
+            tuple(env.pending_steps),
+            env.current_player == player,
+        )
+
+    def save(self, path) -> None:
+        payload = {
+            "alpha": self.alpha,
+            "gamma": self.gamma,
+            "q": [
+                {"state": repr(state), "values": values}
+                for state, values in self.q.items()
+            ],
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+
+    def load(self, path) -> None:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+        self.alpha = payload.get("alpha", self.alpha)
+        self.gamma = payload.get("gamma", self.gamma)
+        self.q = {
+            ast.literal_eval(item["state"]): item["values"]
+            for item in payload.get("q", [])
+        }
+
+    def _values(self, state_key: tuple) -> list[float]:
+        return self.q.setdefault(state_key, [0.0] * ACTION_DIM)
 
 
 @dataclass
@@ -79,7 +161,8 @@ class DQNAgent:
     def __init__(
         self,
         state_dim: int,
-        action_dim: int = 4,
+        action_dim: int = ACTION_DIM,
+        hidden_dim: int = 256,
         lr: float = 1e-3,
         gamma: float = 0.97,
         seed: int | None = None,
@@ -92,21 +175,23 @@ class DQNAgent:
             torch.manual_seed(seed)
 
         self.torch = torch
+        self.state_dim = state_dim
         self.gamma = gamma
         self.action_dim = action_dim
+        self.hidden_dim = hidden_dim
         self.model = nn.Sequential(
-            nn.Linear(state_dim, 64),
+            nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(64, action_dim),
+            nn.Linear(hidden_dim, action_dim),
         )
         self.target = nn.Sequential(
-            nn.Linear(state_dim, 64),
+            nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(64, action_dim),
+            nn.Linear(hidden_dim, action_dim),
         )
         self.target.load_state_dict(self.model.state_dict())
         self.optim = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -163,6 +248,7 @@ class DQNAgent:
                 "target": self.target.state_dict(),
                 "gamma": self.gamma,
                 "action_dim": self.action_dim,
+                "hidden_dim": self.hidden_dim,
             },
             path,
         )
@@ -179,6 +265,7 @@ class ValueNetworkAgent:
     def __init__(
         self,
         state_dim: int,
+        hidden_dim: int = 256,
         lr: float = 1e-3,
         gamma: float = 0.97,
         seed: int | None = None,
@@ -191,21 +278,23 @@ class ValueNetworkAgent:
             torch.manual_seed(seed)
 
         self.torch = torch
+        self.state_dim = state_dim
+        self.hidden_dim = hidden_dim
         self.gamma = gamma
         self.model = nn.Sequential(
-            nn.Linear(state_dim, 128),
+            nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(hidden_dim, 1),
             nn.Tanh(),
         )
         self.target = nn.Sequential(
-            nn.Linear(state_dim, 128),
+            nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, 128),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(hidden_dim, 1),
             nn.Tanh(),
         )
         self.target.load_state_dict(self.model.state_dict())
@@ -266,6 +355,7 @@ class ValueNetworkAgent:
                 "model": self.model.state_dict(),
                 "target": self.target.state_dict(),
                 "gamma": self.gamma,
+                "hidden_dim": self.hidden_dim,
             },
             path,
         )
@@ -274,3 +364,9 @@ class ValueNetworkAgent:
         checkpoint = self.torch.load(path, map_location="cpu")
         self.model.load_state_dict(checkpoint["model"])
         self.target.load_state_dict(checkpoint.get("target", checkpoint["model"]))
+
+    def clone_frozen(self) -> "ValueNetworkAgent":
+        clone = ValueNetworkAgent(state_dim=self.state_dim, hidden_dim=self.hidden_dim, gamma=self.gamma)
+        clone.model.load_state_dict(self.model.state_dict())
+        clone.target.load_state_dict(self.target.state_dict())
+        return clone
