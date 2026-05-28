@@ -12,7 +12,7 @@ POSITION_FEATURES = len(BOARD_POSITIONS)
 PIECES_PER_PLAYER = 4
 MAX_STEPS = 5
 ACTION_DIM = PIECES_PER_PLAYER * MAX_STEPS
-MAX_CONSECUTIVE_BONUS_ROLLS = 4
+INSTANT_WIN_BONUS_ROLLS = 20
 
 YUT_OUTCOMES = (
     ("do", 1, 0.153 / 0.991, False),
@@ -57,6 +57,7 @@ class YutEnv:
         self.turn_count = 0
         self.pending_steps: list[int] = []
         self.last_roll_name: str | None = None
+        self.bonus_win_player: int | None = None
 
     def reset(self, seed: int | None = None) -> list[float]:
         if seed is not None:
@@ -66,6 +67,7 @@ class YutEnv:
         self.turn_count = 0
         self.pending_steps = []
         self.last_roll_name = None
+        self.bonus_win_player = None
         self._ensure_pending_roll()
         return self.observe()
 
@@ -77,6 +79,7 @@ class YutEnv:
         new.turn_count = self.turn_count
         new.pending_steps = self.pending_steps[:]
         new.last_roll_name = self.last_roll_name
+        new.bonus_win_player = self.bonus_win_player
         return new
 
     def observe(self) -> list[float]:
@@ -95,6 +98,8 @@ class YutEnv:
 
     def legal_actions(self) -> list[int]:
         self._ensure_pending_roll()
+        if self.bonus_win_player is not None:
+            return []
         legal = []
         available_steps = sorted(set(self.pending_steps))
         for piece, pos in enumerate(self.positions[self.current_player]):
@@ -108,6 +113,13 @@ class YutEnv:
     def step(self, action: int) -> StepResult:
         self._ensure_pending_roll()
         player = self.current_player
+        if self.bonus_win_player is not None:
+            return StepResult(
+                self.observe(),
+                1.0 if self.bonus_win_player == player else -1.0,
+                True,
+                {"instant_bonus_win": True, "winner": self.bonus_win_player},
+            )
         opponent = 1 - player
         legal = self.legal_actions()
         if action not in legal:
@@ -134,7 +146,10 @@ class YutEnv:
         if captured:
             reward += 0.1
             self.pending_steps.extend(self._roll_turn_results())
-        if done:
+        if self.bonus_win_player is not None:
+            done = True
+            reward += 1.0
+        elif done:
             reward += 1.0
 
         if not done and not self.pending_steps:
@@ -156,12 +171,15 @@ class YutEnv:
                 "from": old_pos,
                 "to": new_pos,
                 "captured": captured,
-                "finished": done and after_finished == 4,
+                "finished": done and (after_finished == 4 or self.bonus_win_player == player),
                 "roll": self.last_roll_name,
+                "instant_bonus_win": self.bonus_win_player == player,
             },
         )
 
     def winner(self) -> int | None:
+        if self.bonus_win_player is not None:
+            return self.bonus_win_player
         for player in (0, 1):
             if self.positions[player].count(FINISH) == 4:
                 return player
@@ -184,9 +202,10 @@ class YutEnv:
             results.append(steps)
             if bonus:
                 consecutive_bonus_rolls += 1
+                if consecutive_bonus_rolls >= INSTANT_WIN_BONUS_ROLLS:
+                    self.bonus_win_player = self.current_player
+                    return results
             if not bonus:
-                return results
-            if consecutive_bonus_rolls >= MAX_CONSECUTIVE_BONUS_ROLLS:
                 return results
 
     def _ensure_pending_roll(self) -> None:
