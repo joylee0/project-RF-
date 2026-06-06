@@ -1,43 +1,32 @@
 # Yutnori Reinforcement Learning
 
-This project implements a reinforcement-learning playground for **Yutnori**, a traditional Korean board game. It includes a simplified two-player Yutnori environment and several agents for baseline comparison.
+This project implements a reinforcement-learning environment for **Yutnori**, a traditional Korean board game. It compares rule-based agents, value-based agents, policy-gradient agents, and tactical PPO variants under the same simplified two-player Yutnori rules.
 
-The default model is a **Value Network agent**, closer to the approach used in prior Yutnori reinforcement-learning work. Tabular Q-learning and DQN baselines are also included for comparison.
-
-한국어 사용 가이드는 [GUIDE_KO.md](GUIDE_KO.md)를 참고하세요.
+한국어 가이드는 [GUIDE_KO.md](GUIDE_KO.md)를 참고하세요.  
+실험 결과 보고서는 [result.md](result.md)를 참고하세요.
 
 ## Features
 
 - Two-player Yutnori environment
 - Four pieces per player
-- Capturing
-- Stacking
+- Capturing and stacking
 - Bonus rolls for `yut` and `mo`
 - Bonus roll after capture
 - Basic shortcut board graph
-- No back-do yet
 - One-hot piece-position observations
-- Held yut/mo roll results that can be consumed in chosen order
+- Held yut/mo results that can be consumed in chosen order
 - Instant win after 20 consecutive yut/mo bonus rolls
-- Expanded actions: roll result choice plus piece choice
-- Terminal loss reward of `-1`
-- Hybrid reward shaping by default: terminal win/loss plus scaled dense rewards
-- DQN and Value Network hidden size default of 256
-- DQN-style agents train on the state after the opponent response when the turn changes
-- Multi-opponent self-play for the Value Network agent
-- Random, rule-based, strategic rule-based, Tabular Q-learning, DQN, Double DQN, Dueling DQN, REINFORCE, A2C, PPO, Value Network, strategic Value Network, and MCTS + Value Network agents
-- 2-step lookahead for the Value Network agent by default
-- Gradient clipping, PPO minibatch-style rollout collection, and normalized policy-gradient returns
-- Best checkpoint saving by Rule-based win rate
-- Training, evaluation, checkpoint saving, and continued training
+- Action masking for PPO variants
+- Value Network, Strategic Value Network, DQN variants, PPO variants, and MCTS + Value agents
+- Tournament, fine-tuning, PPO evaluation, and result logging scripts
+
+Back-do is not implemented as a separate move yet. Its probability is folded into `do`.
 
 ## Yut Probabilities
 
-The environment uses the probability distribution from the referenced Yutnori reinforcement-learning paper. Back-do is not implemented yet, so its 3.8% probability is folded into do. The rounded do/gae/geol/yut/mo probabilities are normalized internally to sum to 1.
-
 | Result | Steps | Probability |
 | --- | ---: | ---: |
-| do | 1 | 15.3%, including back-do |
+| do | 1 | 15.3% |
 | gae | 2 | 34.6% |
 | geol | 3 | 34.6% |
 | yut | 4 | 12.0% |
@@ -47,11 +36,29 @@ The environment uses the probability distribution from the referenced Yutnori re
 
 ```text
 yut_rl/
-  env.py       # Yutnori environment and board movement rules
-  agents.py    # Random, rule-based, DQN, and Value Network agents
-  train.py     # Training and evaluation entry point
+  env.py       # Yutnori rules, board movement, environment state
+  agents.py    # Baseline, DQN, Value Network, PPO-style agents
+  train.py     # Main training and evaluation entry point
 
-GUIDE_KO.md    # Korean guide
+agents/
+  ppo_agent.py # Masked PPO and capture-aware PPO agents
+
+train/
+  train_ppo.py # PPO imitation, curriculum, capture-aware training
+
+experiments/
+  tournament.py                # Round-robin tournament and tuning
+  improve_agents.py            # Strategic value and DQN improvement experiments
+  evaluate_ppo.py              # PPO tournament evaluation and graphs
+  strategic_ppo_finetune.py    # StrategicValue-focused PPO fine-tuning
+
+results/
+  ppo_eval/
+  ppo_training/
+  ppo_strategic_finetune/
+
+result.md      # Current experiment report
+GUIDE_KO.md    # Korean usage guide
 README.md      # Project overview
 requirements.txt
 ```
@@ -69,26 +76,12 @@ python3.11 -m venv .venv
 .venv/bin/python -m yut_rl.train --episodes 20 --eval-games 20 --eval-interval 0
 ```
 
-## Train the Value Network Agent
+## Basic Training
 
-The default command trains the Value Network agent.
+Train the default Value Network agent:
 
 ```bash
 .venv/bin/python -m yut_rl.train
-```
-
-Run a smaller 100-episode experiment:
-
-```bash
-.venv/bin/python -m yut_rl.train --episodes 100 --eval-games 50 --eval-interval 50
-```
-
-## Longer Value Network Training
-
-This command trains the Value Network agent for 50,000 episodes.
-
-```bash
-.venv/bin/python -m yut_rl.train --agent value --episodes 50000
 ```
 
 Run a smaller 1,000-episode experiment:
@@ -97,215 +90,125 @@ Run a smaller 1,000-episode experiment:
 .venv/bin/python -m yut_rl.train --episodes 1000 --eval-games 200 --eval-interval 200
 ```
 
-Configure the self-play opponent pool:
+Train Strategic Value Network:
 
 ```bash
-.venv/bin/python -m yut_rl.train \
-  --agent value \
-  --episodes 50000 \
-  --snapshot-interval 1000 \
-  --opponent-pool-size 5 \
-  --rule-opponent-weight 4.0 \
-  --lookahead-depth 2
+.venv/bin/python -m yut_rl.train --agent strategic-value --episodes 1000 --eval-games 200
 ```
 
-For a stronger Rule-based opponent focus, increase the Rule-based opponent weight and keep best checkpoint saving on:
+Run DQN baselines:
 
 ```bash
-.venv/bin/python -m yut_rl.train \
-  --agent value \
-  --episodes 50000 \
-  --eval-games 300 \
-  --eval-interval 2500 \
-  --rule-opponent-weight 6.0 \
-  --random-opponent-weight 0.25 \
-  --snapshot-opponent-weight 1.5 \
-  --lookahead-depth 2 \
-  --best-model checkpoints/best_value_vs_rule.pt
-```
-
-Useful options:
-
-```bash
-.venv/bin/python -m yut_rl.train \
-  --agent value \
-  --episodes 50000 \
-  --eval-games 200 \
-  --eval-interval 5000 \
-  --gamma 0.97 \
-  --hidden-dim 256 \
-  --epsilon-start 0.8 \
-  --epsilon-end 0.05 \
-  --save-model checkpoints/value.pt
-```
-
-## Run the DQN Baseline
-
-```bash
-.venv/bin/python -m yut_rl.train --agent dqn --episodes 1000 --eval-games 200 --eval-interval 200
-```
-
-## Additional Agents
-
-```bash
+.venv/bin/python -m yut_rl.train --agent dqn --episodes 1000 --eval-games 200
 .venv/bin/python -m yut_rl.train --agent double-dqn --episodes 1000 --eval-games 200
 .venv/bin/python -m yut_rl.train --agent dueling-dqn --episodes 1000 --eval-games 200
-.venv/bin/python -m yut_rl.train --agent strategic --eval-games 200
-.venv/bin/python -m yut_rl.train --agent strategic-value --episodes 1000 --eval-games 200
+```
+
+Run policy-gradient baselines:
+
+```bash
 .venv/bin/python -m yut_rl.train --agent reinforce --episodes 1000 --eval-games 200
 .venv/bin/python -m yut_rl.train --agent a2c --episodes 1000 --eval-games 200
 .venv/bin/python -m yut_rl.train --agent ppo --episodes 1000 --eval-games 200
-.venv/bin/python -m yut_rl.train --agent mcts-value --episodes 1000 --eval-games 200
 ```
 
-## Performance Tuning
+## PPO Experiments
 
-Good starting commands for each neural family:
+Train PPO variants with imitation, curriculum, and capture-aware reward shaping:
 
 ```bash
-# More stable Q-learning baseline
-.venv/bin/python -m yut_rl.train --agent double-dqn --episodes 20000 --target-sync 100
-
-# Stronger DQN variant for action-value learning
-.venv/bin/python -m yut_rl.train --agent dueling-dqn --episodes 20000 --target-sync 100
-
-# Best paper-like baseline in this project
-.venv/bin/python -m yut_rl.train --agent value --episodes 50000 --lookahead-depth 2 --rule-opponent-weight 6.0
-
-# Value Network with tactical Yutnori heuristics blended into action selection
-.venv/bin/python -m yut_rl.train --agent strategic-value --episodes 50000 --lookahead-depth 2 --heuristic-weight 0.35
-
-# Policy-gradient baseline with multiple rollouts per update
-.venv/bin/python -m yut_rl.train --agent ppo --episodes 20000 --rollout-episodes 8 --ppo-epochs 4
-
-# Search at evaluation time, slower but often stronger after value training
-.venv/bin/python -m yut_rl.train --agent mcts-value --episodes 50000 --mcts-simulations 64 --mcts-rollout-depth 8
+.venv/bin/python train/train_ppo.py --out-dir results/ppo_training --eval-games 1000
 ```
 
-Useful training knobs:
-
-- `--reward-mode hybrid`: default. Uses terminal `+1/-1` with scaled capture/finish/step rewards.
-- `--dense-reward-scale`: lowers or raises intermediate reward strength in hybrid mode.
-- `--grad-clip`: prevents unstable neural updates.
-- `--heuristic-weight`: controls how strongly strategic Value Network follows tactical heuristics.
-- `--target-sync`: controls target-network update frequency for DQN and Value Network.
-- `--rollout-episodes`: collects more policy-gradient games before each update.
-- `--best-model`: saves the checkpoint with the best Rule-based win rate.
-
-## Continue Training
+Train capture-aware PPO variants:
 
 ```bash
-.venv/bin/python -m yut_rl.train \
-  --episodes 20000 \
-  --load-model checkpoints/value.pt \
-  --save-model checkpoints/value.pt
+.venv/bin/python train/train_ppo.py \
+  --train-capture-agents \
+  --out-dir results/ppo_training \
+  --eval-games 1000 \
+  --capture-samples 8000 \
+  --capture-imitation-epochs 8
+```
+
+Evaluate PPO tournament:
+
+```bash
+.venv/bin/python experiments/evaluate_ppo.py \
+  --games 1000 \
+  --model-dir results/ppo_training \
+  --out-dir results/ppo_eval
+```
+
+Fine-tune PPO specifically against StrategicValue:
+
+```bash
+.venv/bin/python experiments/strategic_ppo_finetune.py \
+  --analysis-games 1000 \
+  --eval-games 1000 \
+  --out-dir results/ppo_strategic_finetune
 ```
 
 ## Agents
 
 ### Random Agent
 
-Chooses one legal piece uniformly at random.
+Chooses a legal action uniformly at random.
 
 ### Rule-based Agent
 
-Uses simple hand-written priorities such as finishing pieces, capturing opponents, moving stacked pieces, and reducing distance to finish.
+Uses simple priorities: finish, capture, stacked movement, and distance to goal.
 
 ### Strategic Rule-based Agent
 
-Scores each legal move by simulating it and combining finish progress, captures, stack movement, shortcut entry, and exposure to opponent capture threats.
-
-The current default also includes a counterplay penalty. It evaluates the opponent's best immediate reply after the candidate move, which pushed the strategic rule-based agent above 55% in the 1,000-game comparison.
-
-### Tabular Q-learning Agent
-
-Learns Q-values in a Python dictionary without PyTorch. This is the default first-run agent because it works with only the Python standard library.
-
-### DQN Agent
-
-Learns action-values `Q(s, a)` over the expanded action space: five possible roll results times four pieces.
-
-It is a direct value-based baseline: given the current observation, it predicts how good each legal action is. In this project, DQN transitions wait until the trained player gets control again when the turn passes to the opponent, so the next state is represented from the trained player's perspective.
-
-### Double DQN Agent
-
-Separates next-action selection from target-network evaluation to reduce Q-value overestimation.
-
-This is generally a stronger comparison point than plain DQN for this game because Yutnori has long tactical chains caused by captures, stacking, and bonus rolls.
-
-### Dueling DQN Agent
-
-Uses separate value and advantage heads before combining them into action-values.
-
-The implementation combines the dueling architecture with Double DQN-style target calculation, so it is the strongest DQN-family baseline in this codebase.
-
-### REINFORCE Agent
-
-Learns a policy directly from complete game returns. It is simple and useful as a policy-gradient baseline, but it can be noisy because one win or loss affects many earlier actions.
-
-### A2C Agent
-
-Uses an actor-critic structure: the actor chooses actions, while the critic estimates state value. This usually gives a more stable update signal than plain REINFORCE.
-
-### PPO Agent
-
-Uses clipped policy updates to keep the policy from changing too aggressively. The training loop collects multiple rollout games per update and normalizes returns/advantages by default.
+Scores legal actions by simulating the move and combining finish progress, captures, shortcut entry, stacking, danger, and opponent counterplay.
 
 ### Value Network Agent
 
-Evaluates states rather than actions. For each legal action, it simulates the next state and chooses the move with the highest predicted state value. This is closer to the approach used in previous Yutnori reinforcement-learning research than the basic DQN baseline.
-
-During training, it can play against the current model, random/rule-based baselines, and frozen snapshots of older versions of itself.
+Evaluates states instead of actions. For each legal action, it simulates the next state and chooses the action with the highest predicted value.
 
 ### Strategic Value Network Agent
 
-Uses the same Value Network, but blends the learned state-value score with the strategic heuristic score during action selection. This keeps early or weak checkpoints from ignoring tactical Yutnori decisions such as capture risk and shortcut timing.
+Blends Value Network prediction with Strategic Rule-based tactical scoring. This is the strongest non-PPO baseline in the current project.
 
-### MCTS + Value Network Agent
+### PPO Family
 
-Uses the Value Network as a light search evaluator for legal actions.
+The PPO experiments include:
 
-For each legal move, it runs several short rollouts and then uses the Value Network to evaluate the resulting state. More simulations can improve decisions but make evaluation slower.
+- `ppo_baseline`
+- `ppo_masked`
+- `ppo_curriculum`
+- `ppo_imitation`
+- `ppo_capture_imitation`
+- `ppo_tactical`
+- `ppo_vs_strategic_finetuned`
 
-## Compare Improved Agents
+`ppo_capture_imitation` adds capture-aware reward shaping, tactical oversampling, policy distillation from StrategicValue, and a capture-focused action prior.
 
-```bash
-.venv/bin/python -m yut_rl.compare --games 1000
-.venv/bin/python -m yut_rl.compare --games 1000 --value-model checkpoints/value.pt
-```
+## Current Results
 
-The comparison reports win rate, average turns, captures, finished pieces, and average reward while alternating first-player order.
+Main PPO tournament result:
 
-To search for high-win-rate parameter combinations:
+| Agent | Overall Win Rate | Avg Captures |
+| --- | ---: | ---: |
+| strategic_value | 72.86% | 2.81 |
+| strategic_rule | 72.19% | 2.55 |
+| ppo_capture_imitation | 61.76% | 2.77 |
+| ppo_tactical | 61.01% | 2.78 |
+| ppo_imitation | 41.16% | 1.33 |
 
-```bash
-.venv/bin/python -m yut_rl.tune --games 100 --confirm-games 1000 --top-k 3 --value-model checkpoints/value.pt
-```
+StrategicValue direct evaluation:
 
-Current 1,000-game result:
+| Agent | vs StrategicValue Win Rate | Avg Captures |
+| --- | ---: | ---: |
+| ppo_capture_imitation | 46.0% | 1.84 |
+| ppo_vs_strategic_finetuned | 47.6% | 1.88 |
 
-- `strategic_rule_based`: 57.4%
-- `strategic_value`: 72.5%
+Detailed results are in [result.md](result.md).
 
 ## Current Limitations
 
-- Back-do is not implemented yet.
-- The state representation now uses one-hot piece positions, but it is still smaller than a full paper reproduction.
-- The current Value Network is inspired by prior work but is not a full reproduction of the paper.
-- Checkpoints created before the one-hot/action-space change may not load into the current model.
-- Evaluation results depend on random seeds and training length.
-
-## GitHub Upload
-
-Create an empty GitHub repository first, then run:
-
-```bash
-git init
-git add .
-git commit -m "Initial yutnori reinforcement learning project"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
-git push -u origin main
-```
-
-The `.gitignore` file excludes virtual environments, Python cache files, and model checkpoints.
+- Back-do is not implemented as a separate move.
+- The environment is a simplified research environment, not a complete official-rule simulator.
+- Results depend on seeds, training length, and tournament configuration.
+- Some PPO improvements use tactical priors in addition to neural policy learning.
