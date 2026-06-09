@@ -109,6 +109,27 @@ PPO capture-aware 실험에서는 보상 shaping을 별도로 강화했다.
 - `MaskedPPOAgent`
 - `CaptureAwarePPOAgent`
 
+
+---------------------------------------------
+## ppo 선정 이유 ##
+윷놀이는 단순 체스 게임이 아닌, 매 턴마다
+1. 말선택
+2. 어떤 결과를 말에 우선 사용할 건지 판단
+3. 잡기
+4. 완주
+5. 지름길
+6. 업기
+등 같은 상태라도 좋은 행동이 여러 개 존재하기에 policy gradinet 가 유리함
+DQN을 밀지 않았던 이유는 초기 실험결과 시 DQN, DoubleDQN, DuelingDQN 모두 StrategicValue를 넘지 못했음
+DQN 계열은 현재 행동의 가치를 잘 학습하지만, 상대 반격, 잡힐 위험, 후반 전략 등 긴 Horizon 판단이 어렵다.
+
+또한 PPO가 초기부터 성능이 개선 될 여지가 높았는데 
+ppo_baseline 32.23% -> ppo_imitation 41.16% -> ppo_capture_imitation 61.76% 로 상승 폭이 높았지만
+StrategicValue는 72% 성능을 보이며 거의 완성형에 가까운 성능을 보였다.
+
+즉, strategicvalue = 강한 heuristic baseline으로 ppo를 연구 가능한 agent로 만드는 것이 강화학습 프로젝트의 핵심 개념을 모두 실험할 수 있었음
+--------------------------------------------- 
+
 PPO 개선 과정:
 
 1. 기본 PPO
