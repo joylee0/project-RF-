@@ -6,6 +6,7 @@ from typing import Protocol
 
 START = -1
 FINISH = 99
+HOME = 19
 PIECES_PER_PLAYER = 4
 MAX_STEPS = 5
 ACTION_DIM = PIECES_PER_PLAYER * MAX_STEPS
@@ -22,9 +23,9 @@ YUT_OUTCOMES = (
 )
 
 OUTER = list(range(20))
-SHORTCUT_A = [4, 20, 21, 24, 25, 26, FINISH]
-SHORTCUT_B = [9, 22, 23, 24, 25, 26, FINISH]
-CENTER_TO_FINISH = [24, 25, 26, FINISH]
+SHORTCUT_A = [4, 20, 21, 24, 25, 26, HOME, FINISH]
+SHORTCUT_B = [9, 22, 23, 24, 25, 26, HOME, FINISH]
+CENTER_TO_FINISH = [24, 25, 26, HOME, FINISH]
 
 
 @dataclass
@@ -109,6 +110,17 @@ class CommonYutEnv:
         self.evaluation_error = None
         self._ensure_pending_roll()
         return self.observe()
+
+    def clone(self) -> "CommonYutEnv":
+        new = CommonYutEnv(max_decisions=self.max_decisions)
+        new._rng.setstate(self._rng.getstate())
+        new.positions = [row[:] for row in self.positions]
+        new.current_player = self.current_player
+        new.pending_steps = self.pending_steps[:]
+        new.decision_count = self.decision_count
+        new.last_roll_name = self.last_roll_name
+        new.evaluation_error = self.evaluation_error
+        return new
 
     def observe(self) -> list[float]:
         return self.observe_for(self.current_player)

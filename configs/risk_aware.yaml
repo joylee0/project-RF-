@@ -1,0 +1,9 @@
+state_encoder: risk_aware
+reward_function: risk_aware
+action_encoding: step
+action_masking: true
+opponent_type: rule_based
+algorithm: dqn
+seed: 7
+train_episodes: 200
+eval_games: 100

@@ -1,0 +1,9 @@
+state_encoder: board
+reward_function: sparse
+action_encoding: piece_yut
+action_masking: true
+opponent_type: rule_based
+algorithm: dqn
+seed: 7
+train_episodes: 200
+eval_games: 100

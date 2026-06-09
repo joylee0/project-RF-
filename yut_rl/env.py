@@ -4,28 +4,31 @@ from dataclasses import dataclass
 import random
 from typing import Iterable
 
+from yut_rl.action_encodings import ACTION_DIM, get_action_encoding
+from yut_rl.reward_functions import get_reward_function
+from yut_rl.state_encoders import get_state_encoder
+
 START = -1
 FINISH = 99
+HOME = 19
 BOARD_POSITIONS = [START] + list(range(27)) + [FINISH]
 POS_TO_INDEX = {pos: idx for idx, pos in enumerate(BOARD_POSITIONS)}
 POSITION_FEATURES = len(BOARD_POSITIONS)
 PIECES_PER_PLAYER = 4
 MAX_STEPS = 5
-ACTION_DIM = PIECES_PER_PLAYER * MAX_STEPS
-INSTANT_WIN_BONUS_ROLLS = 20
 
 YUT_OUTCOMES = (
-    ("do", 1, 0.153 / 0.991, False),
-    ("gae", 2, 0.346 / 0.991, False),
-    ("geol", 3, 0.346 / 0.991, False),
-    ("yut", 4, 0.120 / 0.991, True),
-    ("mo", 5, 0.026 / 0.991, True),
+    ("do", 1, 0.1536, False),
+    ("gae", 2, 0.3456, False),
+    ("geol", 3, 0.3456, False),
+    ("yut", 4, 0.1296, True),
+    ("mo", 5, 0.0256, True),
 )
 
 OUTER = list(range(20))
-SHORTCUT_A = [4, 20, 21, 24, 25, 26, FINISH]
-SHORTCUT_B = [9, 22, 23, 24, 25, 26, FINISH]
-CENTER_TO_FINISH = [24, 25, 26, FINISH]
+SHORTCUT_A = [4, 20, 21, 24, 25, 26, HOME, FINISH]
+SHORTCUT_B = [9, 22, 23, 24, 25, 26, HOME, FINISH]
+CENTER_TO_FINISH = [24, 25, 26, HOME, FINISH]
 
 
 @dataclass(frozen=True)
@@ -49,15 +52,33 @@ class YutEnv:
     random, rule-based, tabular, or neural agents.
     """
 
-    def __init__(self, seed: int | None = None, max_turns: int = 1000):
+    start_position = START
+    finish_position = FINISH
+
+    def __init__(
+        self,
+        seed: int | None = None,
+        max_turns: int = 1000,
+        state_encoder: str = "legacy",
+        reward_function: str = "legacy",
+        action_encoding: str = "step",
+        enable_action_mask: bool = True,
+    ):
         self.rng = random.Random(seed)
         self.max_turns = max_turns
+        self.state_encoder_name = state_encoder
+        self.reward_function_name = reward_function
+        self.action_encoding_name = action_encoding
+        self.state_encoder = get_state_encoder(state_encoder)
+        self.reward_function = get_reward_function(reward_function)
+        self.action_encoding = get_action_encoding(action_encoding)
+        self.enable_action_mask = enable_action_mask
+        self.action_dim = self.action_encoding.action_dim
         self.positions = [[START] * 4, [START] * 4]
         self.current_player = 0
         self.turn_count = 0
         self.pending_steps: list[int] = []
         self.last_roll_name: str | None = None
-        self.bonus_win_player: int | None = None
 
     def reset(self, seed: int | None = None) -> list[float]:
         if seed is not None:
@@ -67,65 +88,55 @@ class YutEnv:
         self.turn_count = 0
         self.pending_steps = []
         self.last_roll_name = None
-        self.bonus_win_player = None
         self._ensure_pending_roll()
         return self.observe()
 
     def clone(self) -> "YutEnv":
-        new = YutEnv(max_turns=self.max_turns)
+        new = YutEnv(
+            max_turns=self.max_turns,
+            state_encoder=self.state_encoder_name,
+            reward_function=self.reward_function_name,
+            action_encoding=self.action_encoding_name,
+            enable_action_mask=self.enable_action_mask,
+        )
         new.rng.setstate(self.rng.getstate())
         new.positions = [row[:] for row in self.positions]
         new.current_player = self.current_player
         new.turn_count = self.turn_count
         new.pending_steps = self.pending_steps[:]
         new.last_roll_name = self.last_roll_name
-        new.bonus_win_player = self.bonus_win_player
         return new
 
     def observe(self) -> list[float]:
         return self.observe_for(self.current_player)
 
     def observe_for(self, player: int) -> list[float]:
-        me = self.positions[player]
-        opp = self.positions[1 - player]
-        encoded = []
-        for pos in me + opp:
-            encoded.extend(self._encode_pos(pos))
-        for steps in range(1, MAX_STEPS + 1):
-            encoded.append(min(self.pending_steps.count(steps), 4) / 4)
-        encoded.append(1.0 if self.current_player == player else 0.0)
-        return encoded
+        return self.state_encoder.encode(self, player)
 
     def legal_actions(self) -> list[int]:
-        self._ensure_pending_roll()
-        if self.bonus_win_player is not None:
-            return []
-        legal = []
-        available_steps = sorted(set(self.pending_steps))
-        for piece, pos in enumerate(self.positions[self.current_player]):
-            if pos == FINISH:
-                continue
-            if pos == START or self._is_stack_leader(self.current_player, piece):
-                for steps in available_steps:
-                    legal.append(encode_action(piece, steps))
-        return legal
+        return self.action_encoding.legal_actions(self)
+
+    def action_mask(self) -> list[int]:
+        if not self.enable_action_mask:
+            return [1] * self.action_dim
+        return self.action_encoding.action_mask(self)
+
+    def encode_action(self, piece: int, steps: int) -> int:
+        return self.action_encoding.encode(piece, steps)
+
+    def decode_action(self, action: int) -> tuple[int, int]:
+        return self.action_encoding.decode(action)
 
     def step(self, action: int) -> StepResult:
         self._ensure_pending_roll()
         player = self.current_player
-        if self.bonus_win_player is not None:
-            return StepResult(
-                self.observe(),
-                1.0 if self.bonus_win_player == player else -1.0,
-                True,
-                {"instant_bonus_win": True, "winner": self.bonus_win_player},
-            )
         opponent = 1 - player
         legal = self.legal_actions()
         if action not in legal:
             return StepResult(self.observe(), -1.0, False, {"illegal": True})
 
-        piece, steps = decode_action(action)
+        before = self.clone() if self.reward_function is not None else None
+        piece, steps = self.decode_action(action)
         self.pending_steps.remove(steps)
         before_finished = self.positions[player].count(FINISH)
         moving = self._stack_members(player, piece)
@@ -141,45 +152,47 @@ class YutEnv:
 
         after_finished = self.positions[player].count(FINISH)
         done = after_finished == 4
-        reward = -0.01
-        reward += 0.2 * max(0, after_finished - before_finished)
         if captured:
-            reward += 0.1
             self.pending_steps.extend(self._roll_turn_results())
-        if self.bonus_win_player is not None:
-            done = True
-            reward += 1.0
-        elif done:
-            reward += 1.0
 
         if not done and not self.pending_steps:
             self.current_player = opponent
             self.turn_count += 1
             if self.turn_count >= self.max_turns:
                 done = True
-                reward -= 0.5
             else:
                 self._ensure_pending_roll()
+
+        info = {
+            "player": player,
+            "steps": steps,
+            "from": old_pos,
+            "to": new_pos,
+            "captured": captured,
+            "finished": done and after_finished == 4,
+            "finished_count": max(0, after_finished - before_finished),
+            "roll": self.last_roll_name,
+        }
+        if self.reward_function is None:
+            reward = -0.01
+            reward += 0.2 * max(0, after_finished - before_finished)
+            if captured:
+                reward += 0.1
+            if done:
+                reward += 1.0
+            if done and self.turn_count >= self.max_turns:
+                reward -= 0.5
+        else:
+            reward = self.reward_function(before, self, info, done, player)
 
         return StepResult(
             self.observe(),
             reward,
             done,
-            {
-                "player": player,
-                "steps": steps,
-                "from": old_pos,
-                "to": new_pos,
-                "captured": captured,
-                "finished": done and (after_finished == 4 or self.bonus_win_player == player),
-                "roll": self.last_roll_name,
-                "instant_bonus_win": self.bonus_win_player == player,
-            },
+            info,
         )
 
     def winner(self) -> int | None:
-        if self.bonus_win_player is not None:
-            return self.bonus_win_player
         for player in (0, 1):
             if self.positions[player].count(FINISH) == 4:
                 return player
@@ -196,15 +209,9 @@ class YutEnv:
 
     def _roll_turn_results(self) -> list[int]:
         results = []
-        consecutive_bonus_rolls = 0
         while True:
             name, steps, bonus = self._roll_once()
             results.append(steps)
-            if bonus:
-                consecutive_bonus_rolls += 1
-                if consecutive_bonus_rolls >= INSTANT_WIN_BONUS_ROLLS:
-                    self.bonus_win_player = self.current_player
-                    return results
             if not bonus:
                 return results
 
