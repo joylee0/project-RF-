@@ -1,9 +1,9 @@
-# FriendPPO vs Common Rule-Based 참고 평가
+# TeamPPO vs Common Rule-Based 참고 평가
 
-이 문서는 친구 PPO가 `common_rule_based`를 상대로 어느 정도 성능을 내는지 확인한 참고 평가입니다.
+이 문서는 팀원 PPO가 `common_rule_based`를 상대로 어느 정도 성능을 내는지 확인한 참고 평가입니다.
 
-주의: 이 결과는 **MyAgent와 FriendPPO의 직접 대결이 아닙니다.**  
-직접 대결 결과는 [FriendPPO vs MyAgent 공통 Paired Evaluation 보고서](friend_ppo_vs_my_agent_common_eval.md)를 기준으로 봐야 합니다.
+주의: 이 결과는 **MyAgent와 TeamPPO의 직접 대결이 아닙니다.**  
+직접 대결 결과는 [TeamPPO vs MyAgent 공통 Paired Evaluation 보고서](team_ppo_vs_my_agent_common_eval.md)를 기준으로 봐야 합니다.
 
 ## 평가 조건
 
@@ -38,5 +38,5 @@ evaluation errors: 0
 
 ## 해석
 
-이 평가는 친구 PPO가 공통 rule-based baseline을 상대로 학습 목표에 얼마나 근접했는지 보여주는 참고 자료입니다.  
-프로젝트의 최종 직접 비교는 `FriendPPO vs MyAgent(project_rf_rule)` 평가로 분리합니다.
+이 평가는 팀원 PPO가 공통 rule-based baseline을 상대로 60% 학습 목표에 얼마나 근접했는지 보여주는 참고 자료입니다.  
+3-seed 평균 승률은 59.76%로 목표에 거의 도달했습니다. 프로젝트의 최종 직접 비교는 `TeamPPO vs MyAgent(project_rf_rule)` 평가로 분리합니다.

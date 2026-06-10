@@ -8,7 +8,7 @@
 | `yut_rl/env.py` | `YutEnv.step` | 이동, 잡기, 업기, 턴 전환, 기존 dense reward 계산을 함께 처리. | 완료: `reward_function`으로 분리 가능 |
 | `yut_rl/train.py` | `shape_reward` | terminal/hybrid reward 후처리. 학습 루프 내부에 reward mode가 섞여 있음. | 필요: config runner에서는 reward function 사용 |
 | `train/train_ppo.py` | `RewardProfile`, `shaped_reward` | PPO 실험 전용 reward shaping. capture/danger/shortcut feature 포함. | 필요: 새 reward class와 비교 대상으로 유지 |
-| `yut_rl/agents.py` | `StrategicRuleBasedAgent.score_breakdown` | strong heuristic baseline과 tactical score 계산. | 유지: 최종 학습 agent가 아닌 baseline/teacher로 사용 |
+| `yut_rl/agents.py` | `StrategicRuleBasedAgent.score_breakdown` | strong heuristic baseline과 tactical score 계산. | 유지: 최종 TeamPPO 학습 모델이 아닌 비교/분석용 baseline으로 사용 |
 | `yut_rl/agents.py` | `DQNAgent`, `A2CAgent`, `PPOAgent` | 기존 신경망 agent 구현. env observation/action mask에 의존. | 부분 완료: config env와 연결 가능 |
 
 ## 요약

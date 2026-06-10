@@ -15,8 +15,8 @@ os.environ.setdefault("MPLCONFIGDIR", str(MPL_CONFIG_DIR))
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Paired common-env evaluation: MyAgent(ProjectRF rule) vs FriendPPO.")
-    parser.add_argument("--friend-repo", default="/private/tmp/RL-yutnori-friend-model")
+    parser = argparse.ArgumentParser(description="Paired common-env evaluation: MyAgent(ProjectRF rule) vs TeamPPO.")
+    parser.add_argument("--team-repo", default="/private/tmp/RL-yutnori-team-model")
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--training-seed", type=int, default=None)
     parser.add_argument("--seed-start", type=int, default=100_000)
@@ -25,15 +25,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--observation-mode", default="tactical")
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--max-decisions", type=int, default=10_000)
-    parser.add_argument("--output-dir", default="results/friend_ppo_vs_my_agent_common_eval")
+    parser.add_argument("--output-dir", default="results/team_ppo_vs_my_agent_common_eval")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    friend_repo = Path(args.friend_repo)
-    if str(friend_repo) not in sys.path:
-        sys.path.insert(0, str(friend_repo))
+    team_repo = Path(args.team_repo)
+    if str(team_repo) not in sys.path:
+        sys.path.insert(0, str(team_repo))
 
     import numpy as np
     from sb3_contrib import MaskablePPO
@@ -49,7 +49,7 @@ def main() -> None:
     rows = []
     started = time.perf_counter()
 
-    def friend_action(state: GameState, legal_actions: list[int]) -> int:
+    def team_action(state: GameState, legal_actions: list[int]) -> int:
         observation = encode_observation(state, state.current_player, observation_mode=args.observation_mode)
         action_mask = np.zeros(ACTION_SIZE, dtype=np.bool_)
         action_mask[legal_actions] = True
@@ -60,8 +60,8 @@ def main() -> None:
         rows.append(
             play_game(
                 base_seed=base_seed,
-                friend_starts=True,
-                friend_action=friend_action,
+                team_starts=True,
+                team_action=team_action,
                 my_agent=ProjectRFRuleBasedAgent(),
                 max_decisions=args.max_decisions,
             )
@@ -69,8 +69,8 @@ def main() -> None:
         rows.append(
             play_game(
                 base_seed=base_seed,
-                friend_starts=False,
-                friend_action=friend_action,
+                team_starts=False,
+                team_action=team_action,
                 my_agent=ProjectRFRuleBasedAgent(),
                 max_decisions=args.max_decisions,
             )
@@ -80,18 +80,18 @@ def main() -> None:
     summary = summarize(rows, base_seeds, elapsed, args)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "friend_vs_my_agent_games.csv").write_text(to_csv(rows), encoding="utf-8")
-    (out_dir / "friend_vs_my_agent_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (out_dir / "friend_vs_my_agent_report.md").write_text(report_markdown(summary), encoding="utf-8")
+    (out_dir / "team_ppo_vs_my_agent_games.csv").write_text(to_csv(rows), encoding="utf-8")
+    (out_dir / "team_ppo_vs_my_agent_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "team_ppo_vs_my_agent_report.md").write_text(report_markdown(summary), encoding="utf-8")
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 
-def play_game(*, base_seed: int, friend_starts: bool, friend_action, my_agent, max_decisions: int) -> dict:
+def play_game(*, base_seed: int, team_starts: bool, team_action, my_agent, max_decisions: int) -> dict:
     from yutnori.core import GameState, YutSampler
 
-    friend_player = 0
+    team_player = 0
     my_player = 1
-    starting_player = friend_player if friend_starts else my_player
+    starting_player = team_player if team_starts else my_player
     state = GameState(starting_player=starting_player, yut_sampler=YutSampler(seed=base_seed))
     state.start_turn()
     error = ""
@@ -99,8 +99,8 @@ def play_game(*, base_seed: int, friend_starts: bool, friend_action, my_agent, m
 
     while state.winner is None:
         legal_actions = state.get_legal_actions()
-        if state.current_player == friend_player:
-            action = int(friend_action(state, legal_actions))
+        if state.current_player == team_player:
+            action = int(team_action(state, legal_actions))
         else:
             action = int(my_agent.select_action(state, legal_actions))
 
@@ -113,63 +113,63 @@ def play_game(*, base_seed: int, friend_starts: bool, friend_action, my_agent, m
             error = "max_decisions_exceeded"
             break
 
-    friend_win = int(state.winner == friend_player)
+    team_win = int(state.winner == team_player)
     my_win = int(state.winner == my_player)
     return {
         "base_seed": base_seed,
-        "pair_game": "A" if friend_starts else "B",
-        "friend_starts": int(friend_starts),
-        "my_agent_starts": int(not friend_starts),
+        "pair_game": "A" if team_starts else "B",
+        "team_starts": int(team_starts),
+        "my_agent_starts": int(not team_starts),
         "winner": "" if state.winner is None else state.winner,
-        "friend_win": friend_win,
+        "team_ppo_win": team_win,
         "my_agent_win": my_win,
         "first_player_win": int(state.winner == starting_player),
         "second_player_win": int(state.winner == 1 - starting_player),
         "turns": state.turn_count,
         "decisions": state.decision_count,
-        "illegal_friend": int(illegal_player == friend_player),
+        "illegal_team_ppo": int(illegal_player == team_player),
         "illegal_my_agent": int(illegal_player == my_player),
         "evaluation_error": error,
     }
 
 
 def summarize(rows: list[dict], base_seeds: list[int], elapsed: float, args: argparse.Namespace) -> dict:
-    friend_wins = sum(row["friend_win"] for row in rows)
+    team_wins = sum(row["team_ppo_win"] for row in rows)
     my_wins = sum(row["my_agent_win"] for row in rows)
     total_games = len(rows)
-    friend_first = [row for row in rows if row["friend_starts"]]
-    friend_second = [row for row in rows if not row["friend_starts"]]
+    team_first = [row for row in rows if row["team_starts"]]
+    team_second = [row for row in rows if not row["team_starts"]]
     pair_rates = []
     for seed in base_seeds:
         pair = [row for row in rows if row["base_seed"] == seed]
-        pair_rates.append(sum(row["friend_win"] for row in pair) / max(1, len(pair)))
+        pair_rates.append(sum(row["team_ppo_win"] for row in pair) / max(1, len(pair)))
     return {
         "protocol": "project_rf_rule_paired_v1",
         "model_path": args.model_path,
         "training_seed": args.training_seed,
         "opponent": "project_rf_rule",
-        "opponent_interpretation": "MyAgent ported in the friend repository",
+        "opponent_interpretation": "MyAgent ported in the team member repository",
         "observation_mode": args.observation_mode,
         "deterministic": args.deterministic,
         "seed_source": f"range:{args.seed_start}:{args.num_paired_seeds}",
         "base_seed_count": len(base_seeds),
         "base_seed_sha256": seed_sha256(base_seeds),
         "total_games": total_games,
-        "friend_ppo_wins": friend_wins,
+        "team_ppo_wins": team_wins,
         "my_agent_wins": my_wins,
-        "friend_ppo_win_rate": friend_wins / total_games,
+        "team_ppo_win_rate": team_wins / total_games,
         "my_agent_win_rate": my_wins / total_games,
-        "friend_as_first_win_rate": mean(row["friend_win"] for row in friend_first),
-        "friend_as_second_win_rate": mean(row["friend_win"] for row in friend_second),
-        "my_agent_as_first_win_rate": mean(row["my_agent_win"] for row in friend_second),
-        "my_agent_as_second_win_rate": mean(row["my_agent_win"] for row in friend_first),
+        "team_ppo_as_first_win_rate": mean(row["team_ppo_win"] for row in team_first),
+        "team_ppo_as_second_win_rate": mean(row["team_ppo_win"] for row in team_second),
+        "my_agent_as_first_win_rate": mean(row["my_agent_win"] for row in team_second),
+        "my_agent_as_second_win_rate": mean(row["my_agent_win"] for row in team_first),
         "first_player_win_rate": mean(row["first_player_win"] for row in rows),
         "second_player_win_rate": mean(row["second_player_win"] for row in rows),
         "avg_turns": mean(row["turns"] for row in rows),
         "avg_decisions": mean(row["decisions"] for row in rows),
-        "paired_seed_friend_mean": mean(pair_rates),
-        "paired_seed_friend_std": pstdev(pair_rates),
-        "illegal_friend": sum(row["illegal_friend"] for row in rows),
+        "paired_seed_team_ppo_mean": mean(pair_rates),
+        "paired_seed_team_ppo_std": pstdev(pair_rates),
+        "illegal_team_ppo": sum(row["illegal_team_ppo"] for row in rows),
         "illegal_my_agent": sum(row["illegal_my_agent"] for row in rows),
         "evaluation_error_count": sum(1 for row in rows if row["evaluation_error"]),
         "elapsed_seconds": elapsed,
@@ -205,30 +205,30 @@ def to_csv(rows: list[dict]) -> str:
 
 
 def report_markdown(summary: dict) -> str:
-    return f"""# FriendPPO vs MyAgent Common Paired Evaluation
+    return f"""# TeamPPO vs MyAgent Common Paired Evaluation
 
-This is a direct paired evaluation between FriendPPO and MyAgent, where MyAgent is the `project_rf_rule` agent ported in the friend repository.
+This is a direct paired evaluation between TeamPPO and MyAgent, where MyAgent is the `project_rf_rule` agent ported in the team member repository.
 
 | Metric | Value |
 | --- | ---: |
 | Total games | {summary['total_games']} |
 | Paired seeds | {summary['base_seed_count']} |
-| FriendPPO win rate | {summary['friend_ppo_win_rate']:.4f} |
+| TeamPPO win rate | {summary['team_ppo_win_rate']:.4f} |
 | MyAgent win rate | {summary['my_agent_win_rate']:.4f} |
-| FriendPPO as first | {summary['friend_as_first_win_rate']:.4f} |
-| FriendPPO as second | {summary['friend_as_second_win_rate']:.4f} |
+| TeamPPO as first | {summary['team_ppo_as_first_win_rate']:.4f} |
+| TeamPPO as second | {summary['team_ppo_as_second_win_rate']:.4f} |
 | MyAgent as first | {summary['my_agent_as_first_win_rate']:.4f} |
 | MyAgent as second | {summary['my_agent_as_second_win_rate']:.4f} |
 | First-player win rate | {summary['first_player_win_rate']:.4f} |
 | Second-player win rate | {summary['second_player_win_rate']:.4f} |
 | Avg turns | {summary['avg_turns']:.2f} |
 | Avg decisions | {summary['avg_decisions']:.2f} |
-| Friend paired seed std | {summary['paired_seed_friend_std']:.4f} |
-| Illegal FriendPPO | {summary['illegal_friend']} |
+| TeamPPO paired seed std | {summary['paired_seed_team_ppo_std']:.4f} |
+| Illegal TeamPPO | {summary['illegal_team_ppo']} |
 | Illegal MyAgent | {summary['illegal_my_agent']} |
 | Evaluation errors | {summary['evaluation_error_count']} |
 
-This result should be interpreted separately from FriendPPO vs `common_rule_based` and from older tournament results.
+This result should be interpreted separately from TeamPPO vs `common_rule_based`.
 """
 
 
