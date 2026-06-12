@@ -1,109 +1,112 @@
-# Evaluation Protocol
+# 공통 평가 프로토콜
 
-## Purpose
+## 목적
 
-The common paired evaluation protocol was introduced to avoid mixing internal tournament results with cross-project comparison. It controls environment rules, random seeds, and first-player advantage.
+공통 paired evaluation protocol은 서로 다른 프로젝트에서 학습한 agent를 같은 기준으로 비교하기 위해 도입했다.
 
-## Common Environment
+내부 tournament 결과는 각 프로젝트의 개발 과정에서는 의미가 있지만, 환경과 상대 agent가 다르면 직접 비교하기 어렵다. 따라서 최종 비교에서는 공통 윷놀이 규칙, 동일한 seed 조건, 선공/후공 교대 방식을 사용했다.
 
-The evaluation uses the shared Yutnori rule set:
+## 공통 환경
 
-- 2 players
-- 4 pieces per player
-- capture and stacking enabled
-- automatic shortcut after exact branch landing
-- yut/mo bonus turns enabled
-- no backdo
-- no nak
-- no backward movement
-- no agent-selected shortcut action
-- action space of 20 actions
-- illegal actions blocked by action masking
+최종 평가는 다음 윷놀이 규칙을 기준으로 한다.
 
-Yut probabilities:
+- 2인 게임
+- 플레이어당 말 4개
+- 잡기와 업기 사용
+- 분기점에 정확히 도착하면 다음 이동부터 자동 지름길 진입
+- 윷/모 추가 턴 사용
+- 뒷도 없음
+- 낙 없음
+- 후진 이동 없음
+- agent가 직접 지름길을 선택하지 않음
+- action space: `4 pieces x 5 yut results = 20 actions`
+- illegal action은 action mask로 제거
 
-| Result | Steps | Probability |
+윷 결과 확률은 다음과 같다.
+
+| 결과 | 이동량 | 확률 |
 | --- | ---: | ---: |
-| Do | 1 | 0.1536 |
-| Gae | 2 | 0.3456 |
-| Geol | 3 | 0.3456 |
-| Yut | 4 | 0.1296 |
-| Mo | 5 | 0.0256 |
+| 도 | 1 | 0.1536 |
+| 개 | 2 | 0.3456 |
+| 걸 | 3 | 0.3456 |
+| 윷 | 4 | 0.1296 |
+| 모 | 5 | 0.0256 |
 
-## Paired Evaluation
+## Paired Evaluation 방식
 
-For each base seed, two games are played:
+각 base seed마다 두 게임을 실행한다.
 
-| Game | First Player | Second Player |
+| 게임 | 선공 | 후공 |
 | --- | --- | --- |
-| A | Agent 1 | Agent 2 |
-| B | Agent 2 | Agent 1 |
+| Game A | Agent 1 | Agent 2 |
+| Game B | Agent 2 | Agent 1 |
 
-The standard setting uses:
+기본 평가 설정은 다음과 같다.
 
-- 2,500 base seeds
-- 2 games per seed
-- total 5,000 games
-- deterministic policy
-- fixed yut probability table
-- no future yut-result access
-- illegal action count recorded
-- evaluation error count recorded
+- base seed: 2,500개
+- seed당 2게임
+- 총 5,000판
+- deterministic policy 사용
+- 같은 윷 확률 사용
+- 미래 윷 결과 참조 금지
+- illegal action 수 기록
+- evaluation error 수 기록
 
-This reduces first-player bias because each seed is evaluated with swapped player order.
+이 방식은 같은 seed 조건에서 두 agent가 모두 선공과 후공을 경험하게 하므로, 선공 편향을 줄이는 데 도움이 된다.
 
-## Metrics
+## 평가 지표
 
-The protocol reports:
+평가에서는 다음 지표를 기록한다.
 
-- total games
-- paired seeds
-- win rate
-- first-player win rate
-- second-player win rate
-- average turns
-- average captures
-- average finished pieces
-- illegal actions
-- evaluation errors
-- confidence interval when applicable
+- 전체 게임 수
+- paired seed 수
+- 전체 승률
+- 선공 승률
+- 후공 승률
+- 평균 턴 수
+- 평균 잡기 수
+- 평균 완주 말 수
+- illegal action 수
+- evaluation error 수
+- 필요 시 confidence interval
 
-## Separation From Internal Results
+## 내부 결과와 최종 결과의 분리
 
-Internal tournaments and training-stage evaluations are useful for development, but they are not used as final cross-project evidence. Final comparison is based on the common paired protocol.
+내부 tournament, 학습 중간 평가, smoke test는 개발 과정의 참고 자료다.  
+최종 프로젝트 간 비교는 common paired evaluation 결과를 기준으로 해석한다.
 
-## Main Result Tables
+## 주요 결과
 
-### Common Rule-based Opponent
+### Common Rule-based Evaluation
 
 | Agent | Win Rate |
 | --- | ---: |
-| `RL-project` average | 59.76% |
-| `project-RF` representative | 59.46% |
+| RL-project | 59.76% |
+| project-RF | 59.46% |
 
-### Direct Match
+### Head-to-Head Evaluation
 
 | Metric | Value |
 | --- | ---: |
-| `project-RF` Hybrid win rate | 53.98% |
+| project-RF Hybrid win rate | 53.98% |
 | 95% Wilson CI | 53.18% - 54.78% |
 
 ### Ablation
 
-| Setting | Win Rate |
+| 설정 | Win Rate |
 | --- | ---: |
-| `project-RF` without tactical prior | 17.87% |
-| `RL-project` network-only match | 82.13% |
+| project-RF tactical prior 제거 | 17.87% |
+| RL-project network-only 기준 | 82.13% |
 
-## Reproduction Commands
+## 재현 명령어
 
-Validate common env:
+공통 환경 검증:
 
 ```bash
 python experiments/validate_common_env.py
 ```
 
-Run local paired evaluation:
+로컬 common paired evaluation 실행:
 
 ```bash
 python experiments/common_paired_evaluation.py \
@@ -115,7 +118,7 @@ python experiments/common_paired_evaluation.py \
   --output-dir results/common_paired_eval
 ```
 
-Run Team PPO direct evaluation:
+Team PPO와 project-RF agent 직접 평가:
 
 ```bash
 python experiments/team_ppo_vs_my_agent_common_eval.py \
